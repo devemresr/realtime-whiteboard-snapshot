@@ -1,4 +1,3 @@
-import { Server as HttpServer } from 'http';
 import RedisStreamManager from './redis/redisStreamManager';
 import { RedisFactory } from './redis/redisFactory';
 import {
@@ -6,7 +5,18 @@ import {
 	REDIS_CONSUMER_GROUPS,
 	REDIS_STREAMS,
 } from '../constants/redisConstants';
-export async function bootstrapApplication(serverReference: HttpServer) {
+import HeartbeatService from './heartBeatService';
+import SnapshotController from '../controllers/snapshotController';
+
+export interface RedisMessage {
+	[key: string]: any;
+}
+interface RedisStreamMessage {
+	messageId: string;
+	message: Record<string, string>;
+}
+
+export async function bootstrapApplication(port: string) {
 	try {
 		const redisInstanceForStreams = await RedisFactory.createClient(
 			{ port: 6379 },
@@ -16,19 +26,33 @@ export async function bootstrapApplication(serverReference: HttpServer) {
 			console.error('redisInstanceForStreams', err)
 		);
 
-		// Create and initialize Redis stream manager
-		const redisStreamManager = new RedisStreamManager(
-			redisInstanceForStreams.getClient()
+		const redisInstanceForCache = await RedisFactory.createClient(
+			{ port: 6380 },
+			REDIS_CLIENTS.CACHE
 		);
-		await redisStreamManager.createConsumerGroup(
-			REDIS_STREAMS.DRAWING_EVENTS,
-			REDIS_CONSUMER_GROUPS.SNAPSHOT
+		redisInstanceForCache.on('error', (err) =>
+			console.error('redisInstanceForCache', err)
 		);
-		console.log('RedisStreamManager initialized');
+
+		const heartbeatInstance = HeartbeatService.getInstance(
+			redisInstanceForCache.getClient(),
+			{ port }
+		);
+
+		// Create persistence controller with explicit dependencies
+		// const persistenceController = new SnapshotController(
+		// 	port,
+		// 	{ consumerGroup: REDIS_CONSUMER_GROUPS.SNAPSHOT },
+		// 	heartbeatInstance,
+		// 	redisInstanceForStreams.getClient()
+		// );
+
+		// await persistenceController.initialize();
+		// console.log('PersistenceController initialized');
 
 		return {
-			redisStreamManager,
 			redisInstanceForStreams,
+			heartbeatInstance,
 		};
 	} catch (error) {
 		console.log('error at startup:', error);

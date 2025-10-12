@@ -38,7 +38,7 @@ async function startServer() {
 		console.log('MongoDB connected');
 
 		console.log('Bootstrapping application...');
-		await bootstrapApplication(httpServer);
+		const { heartbeatInstance } = await bootstrapApplication(PORT.toString());
 
 		await new Promise((resolve) => {
 			httpServer.listen(parseInt(PORT.toString()), () => {
@@ -46,6 +46,9 @@ async function startServer() {
 				resolve(void 0);
 			});
 		});
+
+		// start the server after everything is set up
+		await heartbeatInstance.start();
 
 		console.log('Server started successfully');
 	} catch (error) {
