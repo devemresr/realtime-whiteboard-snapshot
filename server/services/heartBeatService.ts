@@ -29,8 +29,6 @@ interface config {
 	serverId?: string;
 	HEARTBEAT_INTERVAL_MS?: number;
 	SERVER_TIMEOUT_SECONDS?: number;
-	ORDERED_KEY?: string;
-	DATA_KEY?: string;
 }
 
 class HeartbeatService {
@@ -44,8 +42,8 @@ class HeartbeatService {
 
 	private HEARTBEAT_INTERVAL_MS: number;
 	private SERVER_TIMEOUT_SECONDS: number;
-	private ORDERED_KEY: string;
-	private DATA_KEY: string;
+	private ACTIVE_SERVERS_KEY: string;
+	private ACTIVE_SERVER_DATA: string;
 	private isStarted: boolean = false;
 
 	private constructor(config: config, redisInstanceForCache: Redis) {
@@ -61,8 +59,8 @@ class HeartbeatService {
 		this.serverStartupTime = Date.now();
 		this.HEARTBEAT_INTERVAL_MS = config?.HEARTBEAT_INTERVAL_MS ?? 10 * 1000;
 		this.SERVER_TIMEOUT_SECONDS = config?.SERVER_TIMEOUT_SECONDS ?? 10;
-		this.ORDERED_KEY = config?.ORDERED_KEY ?? 'active_servers_ordered';
-		this.DATA_KEY = config?.DATA_KEY ?? 'active_servers_data';
+		this.ACTIVE_SERVERS_KEY = process.env.ACTIVE_SERVERS_KEY!;
+		this.ACTIVE_SERVER_DATA = process.env.ACTIVE_SERVER_DATA!;
 		this.sendHeartbeat = this.sendHeartbeat.bind(this);
 	}
 
@@ -125,15 +123,14 @@ class HeartbeatService {
 			const rawResults = (await this.redis.eval(
 				heartbeatScript,
 				2,
-				this.ORDERED_KEY,
-				this.DATA_KEY,
+				this.ACTIVE_SERVERS_KEY,
+				this.ACTIVE_SERVER_DATA,
 				this.serverStartupTime.toString(),
 				this.serverId,
 				JSON.stringify(serverInfo),
 				this.SERVER_TIMEOUT_SECONDS // cleanupTime
 			)) as string;
 			const results = JSON.parse(rawResults);
-			console.log('sended a heartbeat', results);
 
 			// todo incase theres a removed server alert via slack
 		} catch (error) {
@@ -154,8 +151,8 @@ class HeartbeatService {
 			const rawResults = (await this.redis.eval(
 				getActiveServers,
 				2,
-				this.ORDERED_KEY,
-				this.DATA_KEY,
+				this.ACTIVE_SERVERS_KEY,
+				this.ACTIVE_SERVER_DATA,
 				this.SERVER_TIMEOUT_SECONDS
 			)) as string;
 
@@ -207,8 +204,8 @@ class HeartbeatService {
 			await this.redis.eval(
 				removeScript,
 				2,
-				this.ORDERED_KEY,
-				this.DATA_KEY,
+				this.ACTIVE_SERVERS_KEY,
+				this.ACTIVE_SERVER_DATA,
 				this.serverId
 			);
 		} catch (error) {

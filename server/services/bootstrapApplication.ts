@@ -18,40 +18,32 @@ interface RedisStreamMessage {
 
 export async function bootstrapApplication(port: string) {
 	try {
-		const redisInstanceForStreams = await RedisFactory.createClient(
+		const redisMain = await RedisFactory.createClient(
 			{ port: 6379 },
-			REDIS_CLIENTS.STREAM
+			REDIS_CLIENTS.MAIN
 		);
-		redisInstanceForStreams.on('error', (err) =>
-			console.error('redisInstanceForStreams', err)
-		);
-
-		const redisInstanceForCache = await RedisFactory.createClient(
-			{ port: 6380 },
-			REDIS_CLIENTS.CACHE
-		);
-		redisInstanceForCache.on('error', (err) =>
-			console.error('redisInstanceForCache', err)
-		);
+		redisMain.on('error', (err) => console.error('redisMain', err));
 
 		const heartbeatInstance = HeartbeatService.getInstance(
-			redisInstanceForCache.getClient(),
-			{ port }
+			redisMain.getClient(),
+			{
+				port,
+			}
 		);
 
 		// Create persistence controller with explicit dependencies
-		// const persistenceController = new SnapshotController(
-		// 	port,
-		// 	{ consumerGroup: REDIS_CONSUMER_GROUPS.SNAPSHOT },
-		// 	heartbeatInstance,
-		// 	redisInstanceForStreams.getClient()
-		// );
+		const persistenceController = new SnapshotController(
+			port,
+			{ consumerGroup: REDIS_CONSUMER_GROUPS.SNAPSHOT },
+			heartbeatInstance,
+			redisMain.getClient()
+		);
 
-		// await persistenceController.initialize();
-		// console.log('PersistenceController initialized');
+		await persistenceController.start();
+		console.log('PersistenceController initialized');
 
 		return {
-			redisInstanceForStreams,
+			redisMain,
 			heartbeatInstance,
 		};
 	} catch (error) {
