@@ -29,15 +29,11 @@ export const REDIS_KEYS = {
 		persistedAwaitingSnapshot: (roomId: string) =>
 			`room:${roomId}:persisted-awaiting-snapshot`,
 
-		inflightAwaitingProcessingMetaData: (roomId: string) =>
-			`room:${roomId}:inflight-awaiting-processing:metadata`,
-
 		// Snapshotted but not yet persisted to DB
 		snapshottedAwaitingPersist: (roomId: string) =>
 			`room:${roomId}:snapshotted-awaiting-persist`,
 
-		snapshotMetaData: (roomId: string) => `room:${roomId}:snapshot:metadata`,
-		snapshotsIds: (roomId: string) => `room:${roomId}:snapshot:ids`,
+		roomMetaData: (roomId: string) => `room:${roomId}:metadata`,
 		cachedSnapshots: (roomId: string) => `room:${roomId}:cached:snapshot`,
 	},
 } as const;

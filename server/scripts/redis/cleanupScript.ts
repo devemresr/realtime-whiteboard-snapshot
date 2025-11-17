@@ -2,60 +2,55 @@ export const cleanupScript = `
     local inflightAwaitingProcessingHashKey = KEYS[1]
     local persistedAwaitingSnapshotHashKey = KEYS[2]
     local snapshottedAwaitingPersistHashKey = KEYS[3]
-    local inflightMetadataHashKey = KEYS[4]
+    local roomMetaDataHashKey = KEYS[4]
+    local snapshotPendingActiveRoomsKey = KEYS[5]
     local persistedAwaitingSnapshotDataKeys = ARGV[1]
-    local inflightAwaitingProcessingData = ARGV[2]
-    local persistencePendingActiveRooms = ARGV[3]
-    local roomId = ARGV[4]
+    local inflightAwaitingProcessingDataKeys = ARGV[2]
+    local roomId = ARGV[3]
     
     local successfullCleanupIds = {}
-    local removedCount = 0
-    local addedCount = 0
-
-	local inflightBefore = redis.call('HGETALL', inflightAwaitingProcessingHashKey)
-	local snapshottedNotPersistedBefore = redis.call('HGETALL', snapshottedAwaitingPersistHashKey)
-	local allDoneBefore = redis.call('HGETALL', persistedAwaitingSnapshotHashKey)
+    local removedFromInflightTotal = 0
     
     -- Decode and check if empty
     local persistedKeysDecoded = cjson.decode(persistedAwaitingSnapshotDataKeys)
-    local inflightData = cjson.decode(inflightAwaitingProcessingData)
+    local inflightData = cjson.decode(inflightAwaitingProcessingDataKeys)
 
-    -- Process inflightData keys
+    --  1. Move event data from inflight to the snpashotted-awating-persistence hash
     if #inflightData > 0 then
 		for i, inflightElement in ipairs(inflightData) do
         	local removed = redis.call('HDEL', inflightAwaitingProcessingHashKey, tostring(inflightElement.packageId))
-        	removedCount = removedCount + removed
-        	local added = redis.call('HSET', snapshottedAwaitingPersistHashKey, tostring(inflightElement.packageId), cjson.encode(inflightElement))
-        	addedCount = addedCount + added
+        	removedFromInflightTotal = removedFromInflightTotal + removed
+        	redis.call('HSET', snapshottedAwaitingPersistHashKey, tostring(inflightElement.packageId), cjson.encode(inflightElement))
         	table.insert(successfullCleanupIds, tostring(inflightElement.packageId))
     	end
 	end
 
-    -- Get current stroke count
-    local currentCount = tonumber(redis.call('HGET', inflightMetadataHashKey, 'strokeCount') or '0')
-
-    -- Calculate new count (ensure it doesn't go below 0)
-    local newCount = math.max(0, currentCount - removedCount)
-
-    -- Update room metadata
-    redis.call('HSET', inflightMetadataHashKey, 
-        'strokeCount', tostring(newCount)
-    )   
-
-    -- Process persisted keys
+    local addedToCompletedCount = 0
+    -- 2. Remove event data from persisted-awaiting-snapshot 
 	if #persistedKeysDecoded > 0 then
     	for i, key in ipairs(persistedKeysDecoded) do
-            redis.call('HDEL', persistedAwaitingSnapshotHashKey, key)
+            local completed = redis.call('HDEL', persistedAwaitingSnapshotHashKey, key)
+            addedToCompletedCount = addedToCompletedCount + completed
 			table.insert(successfullCleanupIds, tostring(key))
     	end
 	end
 
-    -- until theres a change in either inflightAwaitingProcessingHash or persistedAwaitingSnapshotHash theres no need to have this room as active
-    local activeRooms = redis.call('SREM', persistencePendingActiveRooms, roomId)
+    local snapshotTotalEventCount = #persistedKeysDecoded + #inflightData
 
-    local inflightBeforeAfter= redis.call('HGETALL', inflightAwaitingProcessingHashKey)
-    local snapshottedNotPersistedAfter = redis.call('HGETALL', snapshottedAwaitingPersistHashKey)
-    local allDoneAfter = redis.call('HGETALL', persistedAwaitingSnapshotHashKey)
-    -- return {successfullCleanupIds, addedCount, removedCount, inflightBefore, inflightBeforeAfter,snapshottedNotPersistedBefore ,snapshottedNotPersistedAfter, allDoneBefore, allDoneAfter, activeRooms,currentCount} 
-	
-	return successfullCleanupIds`;
+    -- Update room metadata
+    local now = redis.call('TIME')
+    local timestamp = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+    redis.call('HSET', roomMetaDataHashKey, 'lastSnapshotAt', timestamp, 'lastEventAt', timestamp)
+    local newSnapshotTotalEventCount = redis.call('HINCRBY', roomMetaDataHashKey, 'snapshotTotalEventCount', snapshotTotalEventCount)
+    local newInflightAwaitingProcessingCount = redis.call('HINCRBY', roomMetaDataHashKey, 'inflightAwaitingProcessingCount', -removedFromInflightTotal)
+    local newSnapshottedAwaitingPersistCount = redis.call('HINCRBY', roomMetaDataHashKey, 'snapshottedAwaitingPersistCount', removedFromInflightTotal)
+    local newCompletedCount = redis.call('HINCRBY', roomMetaDataHashKey, 'completedCount', addedToCompletedCount)
+    local newPersistedAwaitingSnapshotCount = redis.call('HINCRBY', roomMetaDataHashKey, 'persistedAwaitingSnapshotCount', -addedToCompletedCount)
+
+
+    --  No more snapshot pending event remove the room from snapshotPendingActiveRooms
+    if newPersistedAwaitingSnapshotCount == 0 and newInflightAwaitingProcessingCount == 0 then
+        redis.call('SREM', snapshotPendingActiveRoomsKey, roomId)
+    end
+
+	return {successfullCleanupIds, newInflightAwaitingProcessingCount, newPersistedAwaitingSnapshotCount, newCompletedCount, newSnapshottedAwaitingPersistCount, newSnapshotTotalEventCount,timestamp}`;

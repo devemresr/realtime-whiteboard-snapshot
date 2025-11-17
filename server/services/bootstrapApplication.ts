@@ -32,15 +32,15 @@ export async function bootstrapApplication(port: string) {
 		);
 
 		// Create persistence controller with explicit dependencies
-		const persistenceController = new SnapshotController(
+		const snapshottingController = new SnapshotController(
 			port,
 			{ consumerGroup: REDIS_CONSUMER_GROUPS.SNAPSHOT },
 			heartbeatInstance,
 			redisMain.getClient()
 		);
 
-		await persistenceController.start();
-		console.log('PersistenceController initialized');
+		await snapshottingController.start();
+		console.log('snapshottingController initialized');
 
 		return {
 			redisMain,
