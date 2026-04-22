@@ -2,18 +2,13 @@ import express from 'express';
 import { createServer } from 'node:http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import path from 'path';
-import * as dotenv from 'dotenv';
-const __dirname = path.dirname(process.argv[1]);
-const envPath = path.resolve(__dirname, '../.env');
-dotenv.config({ path: envPath });
 import mongoose from 'mongoose';
 import helmet from 'helmet';
 import credentials from './config/credantials';
 import corsOptions from './config/corsOptions';
 import { bootstrapApplication } from './services/bootstrapApplication';
 
-const PORT = process.argv[2] || 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3003;
 const app = express();
 const httpServer = createServer(app);
 
@@ -38,7 +33,7 @@ async function startServer() {
 		console.log('MongoDB connected');
 
 		console.log('Bootstrapping application...');
-		const { heartbeatInstance } = await bootstrapApplication(PORT.toString());
+		const { heartbeatInstance } = await bootstrapApplication(PORT);
 
 		await new Promise((resolve) => {
 			httpServer.listen(parseInt(PORT.toString()), () => {
@@ -61,7 +56,6 @@ async function startServer() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
 	try {
-		// todo add graceful shutdown
 		httpServer.close();
 		console.log('Graceful shutdown complete');
 	} catch (error) {

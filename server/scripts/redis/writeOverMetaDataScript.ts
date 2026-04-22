@@ -17,15 +17,10 @@ redis.call('HSET', roomMetaDataHashKey,
     'lastSnapshotAt', tostring(roomMetaDataFromDb.lastSnapshotAt),
     'lastPersistedAt', tostring(roomMetaDataFromDb.lastPersistedAt),
     'version', tostring(roomMetaDataFromDb.version),
-    'lastErrorAt', tostring(roomMetaDataFromDb.lastErrorAt),
     'consecutiveErrors', tostring(roomMetaDataFromDb.consecutiveErrors),
-    'lastErrorType', tostring(roomMetaDataFromDb.lastErrorType),
-    'lastErrorMessage', tostring(roomMetaDataFromDb.lastErrorMessage)
     )
 
-redis.call('HSET', roomMetaDataHashKey,
-    'createdAt', tostring(roomMetaDataFromDb.createdAt),
-    'lastEventAt', tostring(roomMetaDataFromDb.lastEventAt))
+redis.call('HSET', roomMetaDataHashKey, 'lastEventAt', tostring(roomMetaDataFromDb.lastEventAt))
 
 -- Add to active rooms
 redis.call('SADD', persistencePendingActiveRoomsKey, roomId)

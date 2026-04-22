@@ -9,7 +9,10 @@ function stableHash(input: string) {
 	// Convert hex to integer
 	let result = 0;
 	for (let i = 0; i < 8; i++) {
-		result = result * 16 + parseInt(hash[i], 16);
+		const char = hash[i];
+		if (char === undefined) break;
+
+		result = result * 16 + parseInt(char, 16);
 	}
 
 	return Math.abs(result);

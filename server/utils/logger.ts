@@ -1,49 +1,32 @@
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+import pino from 'pino';
 
-interface LogContext {
-	roomId?: string;
-	serverId?: string;
-	[key: string]: any;
-}
+const isDev = process.env.ENVIRONMENT !== 'production';
 
-export class Logger {
-	private enableDebug: boolean;
-	private serverId: string;
+const logger = pino({
+	level: process.env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
 
-	constructor(serverId: string, enableDebug = false) {
-		this.serverId = serverId;
-		this.enableDebug = enableDebug || process.env.DEBUG_LOGS === 'true';
-	}
+	// Pretty printing for development
+	...(isDev && {
+		transport: {
+			target: 'pino-pretty',
+			options: {
+				colorize: true,
+				translateTime: 'yyyy-mm-dd HH:MM:ss',
+				ignore: 'pid,hostname',
+				singleLine: false,
+			},
+		},
+	}),
 
-	private format(
-		level: LogLevel,
-		message: string,
-		context?: LogContext
-	): string {
-		const timestamp = new Date().toISOString();
-		const ctx = context ? ` | ${JSON.stringify(context)}` : '';
-		return `[${timestamp}] [${level.toUpperCase()}] [${this.serverId}] ${message}${ctx}`;
-	}
+	...(!isDev && {
+		base: { pid: false, hostname: false },
+		timestamp: pino.stdTimeFunctions.isoTime,
+		formatters: { level: (label) => ({ level: label }) },
+		redact: ['req.headers.authorization', 'req.headers.cookie'],
+	}),
 
-	debug(message: string, context?: LogContext) {
-		if (this.enableDebug) {
-			console.log(this.format('debug', message, context));
-		}
-	}
+	// Add error serialization for better error logging
+	serializers: { err: pino.stdSerializers.err },
+});
 
-	info(message: string, context?: LogContext) {
-		console.log(this.format('info', message, context));
-	}
-
-	warn(message: string, context?: LogContext) {
-		console.warn(this.format('warn', message, context));
-	}
-
-	error(message: string, error?: Error | unknown, context?: LogContext) {
-		const errorContext =
-			error instanceof Error
-				? { ...context, error: error.message, stack: error.stack }
-				: { ...context, error };
-		console.error(this.format('error', message, errorContext));
-	}
-}
+export default logger;

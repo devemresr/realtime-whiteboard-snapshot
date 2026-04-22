@@ -26,9 +26,5 @@ local currentTime = redis.call('TIME')[1]
 local cutoff = currentTime - (cleanupTime + 1)
 
 ${getActiveServersWithoutReturn} 
-local resultObj = {
-activeServers= activeServers,
-removedServers= removedServers
-}
-return cjson.encode(resultObj)
+return {activeServers, removedServers}
 `;

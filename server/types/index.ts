@@ -43,7 +43,6 @@ export interface CleanupResult {
 	newCompletedCount: number;
 	newSnapshottedAwaitingPersistCount: number;
 	newSnapshotTotalEventCount: number;
-	newEventsSinceSnapshot: number;
 	timestamp: number;
 }
 

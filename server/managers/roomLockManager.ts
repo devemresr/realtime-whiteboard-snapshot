@@ -21,14 +21,14 @@ class RoomLockManager {
 			lockValue,
 			'EX',
 			30, // 30 second timeout for database operations
-			'NX'
+			'NX',
 		);
 
 		if (!acquired) {
 			console.log(
 				this.serverId,
 				' COULDNT acquire the lock another server acquired it for the room: ',
-				roomId
+				roomId,
 			);
 			return false;
 		}
@@ -38,7 +38,7 @@ class RoomLockManager {
 
 	public async releaseLockIfOwned(
 		lockKey: string,
-		lockValue: string
+		lockValue: string,
 	): Promise<void> {
 		const releaseLockIfOwnedScript = `
 			if redis.call("GET", KEYS[1]) == ARGV[1] then

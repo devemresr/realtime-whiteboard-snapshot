@@ -1,34 +1,25 @@
-import RedisStreamManager from './redis/redisStreamManager';
 import { RedisFactory } from './redis/redisFactory';
 import {
 	REDIS_CLIENTS,
 	REDIS_CONSUMER_GROUPS,
-	REDIS_STREAMS,
 } from '../constants/redisConstants';
 import HeartbeatService from './heartBeatService';
 import SnapshotController from '../controllers/snapshotController';
 
-export interface RedisMessage {
-	[key: string]: any;
-}
-interface RedisStreamMessage {
-	messageId: string;
-	message: Record<string, string>;
-}
-
-export async function bootstrapApplication(port: string) {
+export async function bootstrapApplication(port: number) {
 	try {
 		const redisMain = await RedisFactory.createClient(
 			{ port: 6379 },
-			REDIS_CLIENTS.MAIN
+			REDIS_CLIENTS.MAIN,
 		);
 		redisMain.on('error', (err) => console.error('redisMain', err));
 
+		console.log('snapshottingController initialized');
 		const heartbeatInstance = HeartbeatService.getInstance(
 			redisMain.getClient(),
 			{
 				port,
-			}
+			},
 		);
 
 		// Create persistence controller with explicit dependencies
@@ -36,11 +27,10 @@ export async function bootstrapApplication(port: string) {
 			port,
 			{ consumerGroup: REDIS_CONSUMER_GROUPS.SNAPSHOT },
 			heartbeatInstance,
-			redisMain.getClient()
+			redisMain.getClient(),
 		);
 
 		await snapshottingController.start();
-		console.log('snapshottingController initialized');
 
 		return {
 			redisMain,

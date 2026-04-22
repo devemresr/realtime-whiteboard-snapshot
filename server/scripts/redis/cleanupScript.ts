@@ -20,7 +20,9 @@ export const cleanupScript = `
 		for i, inflightElement in ipairs(inflightData) do
         	local removed = redis.call('HDEL', inflightAwaitingProcessingHashKey, tostring(inflightElement.packageId))
         	removedFromInflightTotal = removedFromInflightTotal + removed
-        	redis.call('HSET', snapshottedAwaitingPersistHashKey, tostring(inflightElement.packageId), cjson.encode(inflightElement))
+            if removed == 1 then
+                redis.call('HSET', snapshottedAwaitingPersistHashKey, tostring(inflightElement.packageId), cjson.encode(inflightElement))
+            end
         	table.insert(successfullCleanupIds, tostring(inflightElement.packageId))
     	end
 	end
@@ -35,7 +37,7 @@ export const cleanupScript = `
     	end
 	end
 
-    local snapshotTotalEventCount = #persistedKeysDecoded + #inflightData
+    local snapshotTotalEventCount = removedFromInflightTotal + addedToCompletedCount
 
     -- Update room metadata
     local now = redis.call('TIME')
@@ -53,4 +55,4 @@ export const cleanupScript = `
         redis.call('SREM', snapshotPendingActiveRoomsKey, roomId)
     end
 
-	return {successfullCleanupIds, newInflightAwaitingProcessingCount, newPersistedAwaitingSnapshotCount, newCompletedCount, newSnapshottedAwaitingPersistCount, newSnapshotTotalEventCount,timestamp}`;
+	return {successfullCleanupIds, newInflightAwaitingProcessingCount, newPersistedAwaitingSnapshotCount, newCompletedCount, newSnapshottedAwaitingPersistCount, newSnapshotTotalEventCount, timestamp}`;

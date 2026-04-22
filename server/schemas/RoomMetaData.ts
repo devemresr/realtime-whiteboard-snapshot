@@ -2,23 +2,19 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 // Base interface for data operations (insert, update)
 export interface RoomMetaDataBase {
-	totalEventsReceived: Number;
-	inflightAwaitingProcessingCount: Number;
-	persistedAwaitingSnapshotCount: Number;
-	snapshottedAwaitingPersistCount: Number;
-	completedCount: Number;
-	snapshotCount: Number;
-	lastSnapshotAt: Number;
-	createdAt: Number;
-	lastEventAt: Number;
-	lastPersistedAt: Number;
-	version: Number;
-	lastErrorAt: Number;
+	totalEventsReceived: number;
+	inflightAwaitingProcessingCount: number;
+	persistedAwaitingSnapshotCount: number;
+	snapshottedAwaitingPersistCount: number;
+	completedCount: number;
+	snapshotCount: number;
+	lastSnapshotAt: number;
+	lastEventAt: number;
+	lastPersistedAt: number;
+	version: number;
 	roomId: string;
-	lastErrorType?: string;
-	lastErrorMessage?: string;
-	consecutiveErrors: Number;
-	snapshotTotalEventCount: Number;
+	consecutiveErrors: number;
+	snapshotTotalEventCount: number;
 }
 
 // Document interface that extends both base and Document
@@ -38,22 +34,18 @@ const RoomMetaDataSchema = new Schema<RoomMetaData>(
 		snapshotTotalEventCount: { type: Number, required: true }, // total events in all snapshots
 
 		// Timestamps
-		createdAt: { type: Number, required: true },
 		lastEventAt: { type: Number, required: true },
 		lastPersistedAt: { type: Number, required: true },
 		lastSnapshotAt: { type: Number, required: true },
 
 		// Error tracking
 		consecutiveErrors: { type: Number, required: true, default: 0 }, // For circuit breaker logic
-		lastErrorAt: { type: Number, required: true, default: 0 },
-		lastErrorType: { type: String, required: false },
-		lastErrorMessage: { type: String, required: false },
 
 		// Identifiers
 		roomId: { type: String, required: true },
 		version: { type: Number, required: true },
 	},
-	{ timestamps: true }
+	{ timestamps: true },
 );
 
 export default mongoose.model<RoomMetaData>('RoomMetaData', RoomMetaDataSchema);

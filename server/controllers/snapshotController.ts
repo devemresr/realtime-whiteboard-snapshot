@@ -5,8 +5,8 @@ import { BatchProcessingConfig, BatchProcessingInput } from '../types';
 import { RoomResponsibilityService } from '../services/snapshotServices/roomResponsibilityService';
 import { SnapshotDataService } from '../services/snapshotServices/snapshotDataService';
 import { SnapshotPersistenceService } from '../services/snapshotServices/snapshotPersistenceService';
-import { Logger } from '../utils/logger';
 import RoomLockManager from '../managers/roomLockManager';
+import logger from '../utils/logger';
 
 class SnapshotController {
 	private readonly config: BatchProcessingConfig;
@@ -14,17 +14,16 @@ class SnapshotController {
 	private redis: Redis;
 	private serverId: string;
 	private snapshotTimer: NodeJS.Timeout | null;
-	private logger: Logger;
 	private lockService: RoomLockManager;
 	private responsibilityService: RoomResponsibilityService;
 	private dataService: SnapshotDataService;
 	private persistenceService: SnapshotPersistenceService;
 
 	constructor(
-		PORT: string,
+		PORT: number,
 		config: BatchProcessingInput,
 		heartBeatService: HeartbeatService,
-		redis: Redis
+		redis: Redis,
 	) {
 		this.redis = redis;
 
@@ -35,7 +34,6 @@ class SnapshotController {
 
 		this.heartBeatService = heartBeatService;
 		this.snapshotTimer = null;
-		this.logger = new Logger(this.serverId, true);
 
 		this.config = {
 			strokeCountThreshold: 100,
@@ -46,44 +44,57 @@ class SnapshotController {
 		this.lockService = new RoomLockManager(redis, this.serverId);
 		this.responsibilityService = new RoomResponsibilityService(
 			heartBeatService,
-			this.serverId
+			this.serverId,
 		);
 		this.dataService = new SnapshotDataService(redis);
 		this.persistenceService = new SnapshotPersistenceService(redis);
 	}
 
 	public async start(): Promise<void> {
+		const log = logger.child({ serverId: this.serverId, method: 'start' });
+
 		this.snapshotTimer = setInterval(() => this.createSnapshots(), 2000);
 		await this.createSnapshots();
-		this.logger.info('Snapshot controller started');
+		log.info('Snapshot controller started');
 	}
 
 	public async stop(): Promise<void> {
+		const log = logger.child({ serverId: this.serverId, method: 'stop' });
+
 		if (this.snapshotTimer) {
 			clearInterval(this.snapshotTimer);
 			this.snapshotTimer = null;
 		}
-		this.logger.info('Snapshot controller stopped');
+		log.info('Snapshot controller stopped');
 	}
 
 	private async createSnapshots(): Promise<void> {
+		const log = logger.child({
+			serverId: this.serverId,
+			method: 'createSnapshots',
+		});
+
 		try {
 			const activeRooms = await this.getActiveRoomIds();
-			console.log('activeRooms', activeRooms);
 
-			this.logger.debug('Processing active rooms', {
-				count: activeRooms.length,
-			});
+			if (activeRooms.length > 0) {
+				log.info({ activeRooms: activeRooms }, 'Processing active rooms');
+			}
 
 			for (const roomId of activeRooms) {
 				await this.processRoom(roomId);
 			}
 		} catch (error) {
-			this.logger.error('Error in createSnapshots', error);
+			log.error({ error }, 'Error in createSnapshots');
 		}
 	}
 
 	private async processRoom(roomId: string): Promise<void> {
+		const log = logger.child({
+			serverId: this.serverId,
+			roomId,
+			method: 'processRoom',
+		});
 		const maxRetries = 3;
 
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -100,29 +111,30 @@ class SnapshotController {
 					return;
 				}
 
-				this.logger.debug('Server is responsible for room', { roomId });
+				log.debug('Server is responsible for room');
 
 				const lockResult = await this.lockService.acquireLock(roomId);
 
 				if (!lockResult) {
-					this.logger.debug('Failed to acquire lock', { roomId });
+					log.debug('Failed to acquire lock');
 					return;
 				}
+				log.debug(
+					{ lockResult, roomId, server: this.serverId },
+					'lock acquired',
+				);
 				const { lockValue } = lockResult;
 
 				await this.handleSnapshot(roomId, lockValue);
 				return;
 			} catch (error) {
-				this.logger.error(`Process room attempt ${attempt} failed`, error, {
-					roomId,
-				});
+				log.error({ attempt, error }, `Process room attempt ${attempt} failed`);
 				await this.redis.unwatch();
 
 				if (attempt === maxRetries) {
-					this.logger.error(
+					log.error(
+						{ attempt: maxRetries, error },
 						`Failed to process room after ${maxRetries} attempts`,
-						null,
-						{ roomId }
 					);
 				}
 			}
@@ -131,38 +143,39 @@ class SnapshotController {
 
 	private async handleSnapshot(
 		roomId: string,
-		lockValue: string
+		lockValue: string,
 	): Promise<void> {
+		const log = logger.child({
+			serverId: this.serverId,
+			roomId,
+			method: 'handleSnapshot',
+		});
+
 		try {
 			const { inflightData, persistedData, persistedKeys } =
 				await this.dataService.getRoomData(roomId);
 
 			if (inflightData.length === 0 && persistedData.length === 0) {
 				await this.removeFromActiveRooms(roomId);
-				this.logger.warn('No data found for room, removed from active rooms', {
-					roomId,
-				});
+				log.warn('No data found for room, removed from active rooms');
 				return;
 			}
 
 			const allData = [...inflightData, ...persistedData];
 			const sortedData = this.dataService.orderStrokesPackages(allData);
 
-			this.logger.info('Persisting snapshot', {
-				roomId,
-				eventCount: sortedData.length,
-			});
+			log.info({ eventCount: sortedData.length }, 'Persisting snapshot');
 
 			await this.persistenceService.persistSnapshot(
 				roomId,
 				sortedData,
 				persistedKeys,
-				inflightData
+				inflightData,
 			);
 
-			this.logger.info('Snapshot persisted successfully', { roomId });
+			log.info('Snapshot persisted successfully');
 		} catch (error) {
-			this.logger.error('Error handling snapshot', error, { roomId });
+			log.error({ error }, 'Error handling snapshot');
 			throw error;
 		} finally {
 			await this.lockService.releaseLockIfOwned(roomId, lockValue);
@@ -171,14 +184,14 @@ class SnapshotController {
 
 	private async getActiveRoomIds(): Promise<string[]> {
 		return await this.redis.smembers(
-			REDIS_KEYS.activeRooms.snapshotPendingActiveRooms()
+			REDIS_KEYS.activeRooms.snapshotPendingActiveRooms(),
 		);
 	}
 
 	private async removeFromActiveRooms(roomId: string): Promise<void> {
 		await this.redis.srem(
 			REDIS_KEYS.activeRooms.snapshotPendingActiveRooms(),
-			roomId
+			roomId,
 		);
 	}
 }

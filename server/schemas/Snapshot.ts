@@ -25,16 +25,6 @@ type RoomData = {
 	originalSocketId: string;
 };
 
-const StrokeSchema = new Schema<Stroke>(
-	{
-		// todo change it later
-		x: { type: Number, required: false },
-		y: { type: Number, required: false },
-		timestamp: { type: Number, required: false },
-	},
-	{ _id: false } // no separate id for subdocs
-);
-
 const SnapshotSchema = new Schema(
 	{
 		snapshotId: { type: String, required: true, unique: true },
@@ -43,7 +33,7 @@ const SnapshotSchema = new Schema(
 		snapshotTotalEventCount: { type: Number, required: true },
 		createdAt: { type: Date, default: Date.now, expires: 3600 }, // TTL since its for onboards and nothing else
 	},
-	{ timestamps: true }
+	{ timestamps: true },
 );
 
 export default mongoose.model<SnapshotData>('SnapshotSchema', SnapshotSchema);

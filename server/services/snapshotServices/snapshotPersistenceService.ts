@@ -2,7 +2,6 @@ import Redis from 'ioredis';
 import mongoose from 'mongoose';
 import { promisify } from 'util';
 import { gzip as gzipCallback } from 'zlib';
-import { nanoid } from 'nanoid';
 import Snapshot from '../../schemas/Snapshot';
 import RoomMetaData, { RoomMetaDataBase } from '../../schemas/RoomMetaData';
 import { REDIS_KEYS } from '../../constants/redisConstants';
@@ -14,6 +13,8 @@ import {
 	CleanupResultTuple,
 	TransformedRoomData,
 } from '../../types';
+import logger from '../../utils/logger';
+import { v4 as uuidv4 } from 'uuid';
 
 const gzip = promisify(gzipCallback);
 
@@ -28,16 +29,25 @@ export class SnapshotPersistenceService {
 		roomId: string,
 		sortedData: TransformedRoomData[],
 		persistedKeys: string[],
-		inflightData: TransformedRoomData[]
+		inflightData: TransformedRoomData[],
 	): Promise<any> {
+		const log = logger.child({ roomId, method: 'persistSnapshot' });
+
 		const session = await mongoose.startSession();
 		session.startTransaction();
 
 		try {
-			const snapshotId = `snapshot_${roomId}_${Date.now()}_${nanoid(10)}`;
+			const snapshotId = `snapshot_${roomId}_${Date.now()}_${uuidv4()}`;
+			log.info(
+				{ snapshotId, sortedDataCount: sortedData.length },
+				'Starting snapshot persistence',
+			);
+
 			const compressedSnapshot = await this.compressData(sortedData);
+			log.debug({ snapshotId }, 'Snapshot data compressed');
 
 			await this.cacheSnapshot(snapshotId, roomId, compressedSnapshot);
+			log.debug({ snapshotId }, 'Snapshot cached in Redis');
 
 			const result = await Snapshot.insertOne(
 				{
@@ -46,14 +56,16 @@ export class SnapshotPersistenceService {
 					compressedSnapshotData: compressedSnapshot,
 					snapshotTotalEventCount: sortedData.length,
 				},
-				{ session }
+				{ session },
 			);
+			log.info({ snapshotId }, 'Snapshot inserted into DB');
 
 			const cleanupResults = await this.cleanup(
 				persistedKeys,
 				inflightData,
-				roomId
+				roomId,
 			);
+			log.debug({ cleanupResults }, 'Cleanup completed');
 
 			await RoomMetaData.findOneAndUpdate(
 				{ roomId },
@@ -73,13 +85,16 @@ export class SnapshotPersistenceService {
 					},
 					$inc: { snapshotCount: 1 },
 				},
-				{ upsert: true, session }
+				{ upsert: true, session },
 			);
+			log.info({ snapshotId }, 'Room metadata updated');
 
 			await session.commitTransaction();
+			log.info({ snapshotId }, 'Transaction committed successfully');
 			return result;
 		} catch (error) {
 			await session.abortTransaction();
+			log.error({ error }, 'Transaction aborted due to error');
 			throw error;
 		} finally {
 			session.endSession();
@@ -94,8 +109,11 @@ export class SnapshotPersistenceService {
 	private async cacheSnapshot(
 		snapshotId: string,
 		roomId: string,
-		snapshotData: string
+		snapshotData: string,
 	): Promise<boolean> {
+		const log = logger.child({ roomId, snapshotId, method: 'cacheSnapshot' });
+
+		log.debug('Evaluating cacheSnapshotScript against Redis');
 		const res = (await this.redis.eval(
 			cacheSnapshotScript,
 			2,
@@ -103,24 +121,28 @@ export class SnapshotPersistenceService {
 			REDIS_KEYS.roomData.cachedSnapshots(roomId),
 			snapshotData,
 			snapshotId,
-			roomId
+			roomId,
 		)) as any;
 
 		if (res[0] === 0) {
+			log.warn('Metadata missing during cache, fetching from DB and retrying');
 			await this.getMetaDataFromDb(roomId);
 			return this.cacheSnapshot(snapshotId, roomId, snapshotData);
 		}
 
+		log.debug('Snapshot cached successfully');
 		return true;
 	}
 
 	private async getMetaDataFromDb(
-		roomId: string
+		roomId: string,
 	): Promise<RoomMetaDataBase | null> {
+		const log = logger.child({ roomId, method: 'getMetaDataFromDb' });
 		const maxRetries = 3;
 
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
+				log.info({ attempt }, 'Fetching metadata from DB');
 				const dbMeta = await RoomMetaData.findOne({ roomId });
 
 				if (!dbMeta) {
@@ -139,14 +161,10 @@ export class SnapshotPersistenceService {
 					completedCount: dbMeta.completedCount,
 					snapshotCount: dbMeta.snapshotCount,
 					lastSnapshotAt: dbMeta.lastSnapshotAt,
-					createdAt: dbMeta.createdAt,
 					lastEventAt: dbMeta.lastEventAt,
 					lastPersistedAt: dbMeta.lastPersistedAt,
 					version: dbMeta.version,
-					lastErrorAt: 0,
 					consecutiveErrors: 0,
-					lastErrorType: dbMeta.lastErrorType,
-					lastErrorMessage: dbMeta.lastErrorMessage,
 				};
 
 				await this.redis.eval(
@@ -156,14 +174,23 @@ export class SnapshotPersistenceService {
 					REDIS_KEYS.activeRooms.snapshotPendingActiveRooms(),
 					REDIS_KEYS.activeRooms.persistencePendingActiveRooms(),
 					roomId,
-					JSON.stringify(metaData)
+					JSON.stringify(metaData),
 				);
 
+				log.info({ attempt }, 'Metadata written back to Redis successfully');
 				return metaData;
 			} catch (error) {
 				if (attempt < maxRetries - 1) {
-					await new Promise((resolve) =>
-						setTimeout(resolve, (attempt + 1) * 1000)
+					const delay = (attempt + 1) * 1000;
+					log.warn(
+						{ attempt, delay, error },
+						'Metadata fetch failed, retrying',
+					);
+					await new Promise((resolve) => setTimeout(resolve, delay));
+				} else {
+					log.error(
+						{ attempt, error },
+						'All metadata fetch attempts exhausted',
 					);
 				}
 			}
@@ -175,8 +202,17 @@ export class SnapshotPersistenceService {
 	private async cleanup(
 		persistedKeys: string[],
 		inflightData: TransformedRoomData[],
-		roomId: string
+		roomId: string,
 	): Promise<CleanupResult> {
+		const log = logger.child({ roomId, method: 'cleanup' });
+
+		log.info(
+			{
+				persistedKeyCount: persistedKeys.length,
+				inflightDataCount: inflightData.length,
+			},
+			'Running cleanup script',
+		);
 		const result = (await this.redis.eval(
 			cleanupScript,
 			5,
@@ -187,9 +223,10 @@ export class SnapshotPersistenceService {
 			REDIS_KEYS.activeRooms.snapshotPendingActiveRooms(),
 			JSON.stringify(persistedKeys),
 			JSON.stringify(inflightData),
-			roomId
+			roomId,
 		)) as CleanupResultTuple;
 
+		log.debug('Cleanup script executed, mapping result');
 		return this.toCleanupResult(result);
 	}
 
@@ -200,7 +237,6 @@ export class SnapshotPersistenceService {
 		newCompletedCount,
 		newSnapshottedAwaitingPersistCount,
 		newSnapshotTotalEventCount,
-		newEventsSinceSnapshot,
 		timestamp,
 	]: CleanupResultTuple): CleanupResult {
 		return {
@@ -210,7 +246,6 @@ export class SnapshotPersistenceService {
 			newCompletedCount,
 			newSnapshottedAwaitingPersistCount,
 			newSnapshotTotalEventCount,
-			newEventsSinceSnapshot,
 			timestamp,
 		};
 	}
