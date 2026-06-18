@@ -67,24 +67,73 @@ export class SnapshotPersistenceService {
 			);
 			log.debug({ cleanupResults }, 'Cleanup completed');
 
+			const inflightToSnapshottedCount = cleanupResults.addedToSnapshottedTotal;
+
+			const persistedToCompletedCount = cleanupResults.completedProcessingAdded;
+
+			const snapshotTotalEventCount =
+				inflightToSnapshottedCount + persistedToCompletedCount;
+
 			await RoomMetaData.findOneAndUpdate(
 				{ roomId },
-				{
-					$set: {
-						inflightAwaitingProcessingCount:
-							cleanupResults.newInflightAwaitingProcessingCount,
-						persistedAwaitingSnapshotCount:
-							cleanupResults.newPersistedAwaitingSnapshotCount,
-						snapshotTotalEventCount: cleanupResults.newSnapshotTotalEventCount,
-						newEventsSinceSnapshot: cleanupResults.newEventsSinceSnapshot,
-						snapshottedAwaitingPersistCount:
-							cleanupResults.newSnapshottedAwaitingPersistCount,
-						completedCount: cleanupResults.newCompletedCount,
-						lastSnapshotAt: cleanupResults.timestamp,
-						lastEventAt: cleanupResults.timestamp,
+				[
+					{
+						$set: {
+							inflightAwaitingProcessingCount: {
+								$max: [
+									0,
+									{
+										$subtract: [
+											{ $ifNull: ['$inflightAwaitingProcessingCount', 0] },
+											inflightToSnapshottedCount,
+										],
+									},
+								],
+							},
+
+							snapshottedAwaitingPersistCount: {
+								$add: [
+									{ $ifNull: ['$snapshottedAwaitingPersistCount', 0] },
+									inflightToSnapshottedCount,
+								],
+							},
+
+							persistedAwaitingSnapshotCount: {
+								$max: [
+									0,
+									{
+										$subtract: [
+											{ $ifNull: ['$persistedAwaitingSnapshotCount', 0] },
+											persistedToCompletedCount,
+										],
+									},
+								],
+							},
+
+							completedProcessingCount: {
+								$add: [
+									{ $ifNull: ['$completedProcessingCount', 0] },
+									persistedToCompletedCount,
+								],
+							},
+
+							snapshotTotalEventCount: {
+								$add: [
+									{ $ifNull: ['$snapshotTotalEventCount', 0] },
+									snapshotTotalEventCount,
+								],
+							},
+
+							snapshotCount: {
+								$add: [{ $ifNull: ['$snapshotCount', 0] }, 1],
+							},
+
+							lastSnapshotAt: cleanupResults.timestamp,
+							lastActivityAt: cleanupResults.timestamp,
+							updatedAt: '$$NOW',
+						},
 					},
-					$inc: { snapshotCount: 1 },
-				},
+				],
 				{ upsert: true, session },
 			);
 			log.info({ snapshotId }, 'Room metadata updated');
@@ -143,29 +192,13 @@ export class SnapshotPersistenceService {
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
 				log.info({ attempt }, 'Fetching metadata from DB');
-				const dbMeta = await RoomMetaData.findOne({ roomId });
+				const dbMeta = await RoomMetaData.findOne({
+					roomId,
+				}).lean();
 
 				if (!dbMeta) {
 					throw new Error('No metadata found in DB');
 				}
-
-				const metaData: RoomMetaDataBase = {
-					totalEventsReceived: dbMeta.totalEventsReceived,
-					inflightAwaitingProcessingCount:
-						dbMeta.inflightAwaitingProcessingCount,
-					snapshottedAwaitingPersistCount:
-						dbMeta.snapshottedAwaitingPersistCount,
-					snapshotTotalEventCount: dbMeta.snapshotTotalEventCount,
-					roomId: dbMeta.roomId,
-					persistedAwaitingSnapshotCount: dbMeta.persistedAwaitingSnapshotCount,
-					completedCount: dbMeta.completedCount,
-					snapshotCount: dbMeta.snapshotCount,
-					lastSnapshotAt: dbMeta.lastSnapshotAt,
-					lastEventAt: dbMeta.lastEventAt,
-					lastPersistedAt: dbMeta.lastPersistedAt,
-					version: dbMeta.version,
-					consecutiveErrors: 0,
-				};
 
 				await this.redis.eval(
 					writeOverMetaDataScript,
@@ -174,11 +207,11 @@ export class SnapshotPersistenceService {
 					REDIS_KEYS.activeRooms.snapshotPendingActiveRooms(),
 					REDIS_KEYS.activeRooms.persistencePendingActiveRooms(),
 					roomId,
-					JSON.stringify(metaData),
+					JSON.stringify(dbMeta),
 				);
 
 				log.info({ attempt }, 'Metadata written back to Redis successfully');
-				return metaData;
+				return dbMeta;
 			} catch (error) {
 				if (attempt < maxRetries - 1) {
 					const delay = (attempt + 1) * 1000;
@@ -238,6 +271,10 @@ export class SnapshotPersistenceService {
 		newSnapshottedAwaitingPersistCount,
 		newSnapshotTotalEventCount,
 		timestamp,
+		removedFromInflightTotal,
+		removedFromPersistedTotal,
+		addedToSnapshottedTotal,
+		completedProcessingAdded,
 	]: CleanupResultTuple): CleanupResult {
 		return {
 			successfullCleanupIds,
@@ -247,6 +284,10 @@ export class SnapshotPersistenceService {
 			newSnapshottedAwaitingPersistCount,
 			newSnapshotTotalEventCount,
 			timestamp,
+			removedFromInflightTotal,
+			removedFromPersistedTotal,
+			addedToSnapshottedTotal,
+			completedProcessingAdded,
 		};
 	}
 }

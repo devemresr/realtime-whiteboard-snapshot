@@ -38,21 +38,34 @@ export interface TransformedRoomData extends RoomDataBase {
 
 export interface CleanupResult {
 	successfullCleanupIds: string[];
+
 	newInflightAwaitingProcessingCount: number;
 	newPersistedAwaitingSnapshotCount: number;
 	newCompletedCount: number;
 	newSnapshottedAwaitingPersistCount: number;
 	newSnapshotTotalEventCount: number;
+
 	timestamp: number;
+
+	removedFromInflightTotal: number;
+	removedFromPersistedTotal: number;
+	addedToSnapshottedTotal: number;
+	completedProcessingAdded: number;
 }
 
 export type CleanupResultTuple = [
-	string[],
-	number,
-	number,
-	number,
-	number,
-	number,
-	number,
-	number,
+	string[], // successfullCleanupIds
+
+	number, // newInflightAwaitingProcessingCount
+	number, // newPersistedAwaitingSnapshotCount
+	number, // newCompletedCount
+	number, // newSnapshottedAwaitingPersistCount
+	number, // newSnapshotTotalEventCount
+
+	number, // timestamp
+
+	number, // removedFromInflightTotal
+	number, // removedFromPersistedTotal
+	number, // addedToSnapshottedTotal
+	number, // completedProcessingAdded
 ];

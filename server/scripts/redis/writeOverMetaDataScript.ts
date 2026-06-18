@@ -6,21 +6,14 @@ local roomId = ARGV[1]
 local roomMetaDataJson = ARGV[2]
 local roomMetaDataFromDb = cjson.decode(roomMetaDataJson)
 
-redis.call('HSET', roomMetaDataHashKey,
-    'totalEventsReceived', tostring(roomMetaDataFromDb.totalEventsReceived),
-    'inflightAwaitingProcessingCount', tostring(roomMetaDataFromDb.inflightAwaitingProcessingCount),
-    'persistedAwaitingSnapshotCount', tostring(roomMetaDataFromDb.persistedAwaitingSnapshotCount),
-    'snapshottedAwaitingPersistCount', tostring(roomMetaDataFromDb.snapshottedAwaitingPersistCount),
-    'snapshotTotalEventCount', tostring(roomMetaDataFromDb.snapshotTotalEventCount),
-    'completedCount', tostring(roomMetaDataFromDb.completedCount),
-    'snapshotCount', tostring(roomMetaDataFromDb.snapshotCount),
-    'lastSnapshotAt', tostring(roomMetaDataFromDb.lastSnapshotAt),
-    'lastPersistedAt', tostring(roomMetaDataFromDb.lastPersistedAt),
-    'version', tostring(roomMetaDataFromDb.version),
-    'consecutiveErrors', tostring(roomMetaDataFromDb.consecutiveErrors),
-    )
+local args = {}
+for field, value in pairs(roomMetaDataFromDb) do
+    table.insert(args, field)
+    table.insert(args, tostring(value))
+end
 
-redis.call('HSET', roomMetaDataHashKey, 'lastEventAt', tostring(roomMetaDataFromDb.lastEventAt))
+redis.call('HSET', roomMetaDataHashKey, unpack(args))
+
 
 -- Add to active rooms
 redis.call('SADD', persistencePendingActiveRoomsKey, roomId)
